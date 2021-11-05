@@ -1,0 +1,116 @@
+trigger:
+  branches:
+    include:
+    - master
+    - feature/*
+
+variables:
+  globalJsonLocation: './global.json'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  BuildConfiguration: 'Release'
+  Solution: 'AnnualReportsTool.sln'
+  ProjectPath: './AnnualReportsTool'
+  Project: '$(ProjectPath)/AnnualReportsTool.csproj'
+  TestProject: './AnnualReportsTool.Test/AnnualReportsTool.Test.csproj'
+  NuGetVersion: ''
+
+stages:
+- stage: Build
+  displayName: Build stage
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      name: eda-build-agents
+    steps:
+    - task: NuGetToolInstaller@1
+      displayName: 'Use NuGet 5.0.x'
+      inputs:
+        versionSpec: 5.0.x
+        checkLatest: true
+
+    - task: NuGetCommand@2
+      displayName: 'NuGet Reconfigure Source Auth'
+      inputs:
+        command: custom
+        arguments: 'sources update -Name "AgileCluster" -username "dummy@dummy" -password $(System.AccessToken) -ValidAuthenticationTypes basic -source "https://ent.devops.eda.admin.ch/tfs/Entwicklung/_packaging/AgileCluster/nuget/v3/index.json" -configfile "nuget.config"'
+
+    - powershell: |
+          echo "##vso[task.setvariable variable=dotnetVersionToUse]$dotnetVersion"
+          if ([System.IO.File]::Exists("$(globalJsonLocation)")) {
+            $globalJson = Get-Content "$(globalJsonLocation)" | Out-String | ConvertFrom-Json
+            $dotnetVersionFromGlobal = $globalJson.sdk.version
+            if ([string]::IsNullOrEmpty($dotnetVersionFromGlobal)) {
+              Write-Host "No sdk version defined in $(globalJsonLocation) value."
+            }
+            else {
+              echo "##vso[task.setvariable variable=dotnetVersionToUse]$dotnetVersionFromGlobal"
+            }
+          }
+          else {
+            Write-Warning "No global.json defined at $(globalJsonLocation)." 
+          }
+      displayName: 'Determine dotnet version'
+
+    - task: UseDotNet@2
+      displayName: 'Use dotnet'
+      inputs:
+        version: '$(dotnetVersionToUse)'
+
+    - powershell: |
+        dotnet tool install --tool-path . nbgv
+        ./nbgv cloud -c -a -p $(ProjectPath)
+      displayName: 'Set Version'
+
+    - powershell: |
+        dotnet tool install --tool-path . dotnet-format
+        ./dotnet-format -w $(Project)
+      displayName: 'Enforce Formatting'
+
+    - task: DotNetCoreCLI@2
+      displayName: Build
+      inputs:
+        projects: '$(Project)'
+        arguments: '--configuration $(BuildConfiguration)'
+
+    - task: DotNetCoreCLI@2
+      displayName: Test
+      inputs:
+        command: test
+        projects: '$(TestProject)'
+        arguments: '--configuration $(BuildConfiguration) --filter Category!=Integration&Category!=UI-Test'
+
+    - powershell: |
+        dotnet clean $(Solution)
+      displayName: 'Clean project'
+
+    - powershell: |
+        $version = '$(NBGV_SEMVER2)'
+        dotnet pack $(Project) -o $(Build.ArtifactStagingDirectory) --no-build /p:NuspecFile=../Eda.AglieCluster.AppTempalte.nuspec /p:NuspecProperties=version=$($version);
+      displayName: Create package
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact'
+
+- stage: Deploy
+  displayName: Deploy stage
+  condition: and(succeeded('Build'), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+  jobs:
+  - job: Deploy
+    displayName: Deploy
+    pool:
+      name: eda-build-agents
+    steps:
+      - task: DownloadBuildArtifacts@0
+        inputs:
+          buildType: 'current'
+          downloadType: 'single'
+          downloadPath: '$(Build.SourcesDirectory)'
+          artifactName: 'drop'
+      - task: NuGetCommand@2
+        displayName: Publish package
+        inputs:
+          command: 'push'
+          packagesToPush: '$(Build.SourcesDirectory)/**/*.nupkg;!$(Build.SourcesDirectory)/**/*.symbols.nupkg'
+          nuGetFeedType: 'internal'
+          publishVstsFeed: '/2e4f4ca6-21e8-46a8-b99e-794e7e07d994'

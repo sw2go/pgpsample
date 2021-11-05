@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Read input file in chunks</title>
+  <script src="https://cdn.jsdelivr.net/npm/web-streams-polyfill@2.0.2/dist/ponyfill.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/streamsaver@2.0.3/StreamSaver.min.js"></script>
+  <script>const streamSaver = window.streamSaver</script>
+</head>
+<body>
+<p>Click 'Choose file' to select a file, to split it in blocks and to simulate a chunked upload</p>
+<p>Then click 'Write' to simulate the download of the chunked blocks and save it as file again</p>
+  <input type="file" id="input" />
+  <button onclick="writeChunks()">Write</button>
+  <script>   
+
+	var serverSimulation = [];
+  
+	function parseFile(file, callback) {
+		var fileSize   = file.size;
+		var chunkSize  = 64 * 1024; // bytes
+		var offset     = 0;
+		var self       = this; // we need a reference to the current object
+		var chunkReaderBlock = null;
+
+		var readEventHandler = function(evt) {
+			if (evt.target.error == null) {
+				var inputBuffer = new Uint8Array(evt.target.result);
+				offset += inputBuffer.length;
+				callback(inputBuffer); // callback for handling read chunk
+			} else {
+				console.log("Read error: " + evt.target.error);
+				return;
+			}
+			if (offset >= fileSize) {
+				console.log("Done reading file");
+				return;
+			}
+
+			// of to the next chunk
+			chunkReaderBlock(offset, chunkSize, file);
+		}
+
+		chunkReaderBlock = function(_offset, length, _file) {
+			var r = new FileReader();
+			var blob = _file.slice(_offset, length + _offset);
+			r.onload = readEventHandler;
+			r.readAsArrayBuffer(blob);
+		}
+
+		// now let's start the read with the first block
+		chunkReaderBlock(offset, chunkSize, file);
+	}
+	
+	// "Choose File and simulate a chunked upload 
+    document.getElementById('input').addEventListener('change', (e) => {
+	  console.log("file selected");
+      const file = document.getElementById('input').files[0];
+
+      if (file) {
+        parseFile(file, (block) => {
+			console.log(block);			
+			// Hier würde man z.B. den Block verschlüsseln und dann zum Server uploaden
+			serverSimulation.push(block);	// buffers
+		});
+      }
+    });
+	
+	async function writeChunks() {
+	  const fileStream = streamSaver.createWriteStream('filename.txt', {
+		//size: 22, // (optional) Will show progress
+		writableStrategy: undefined, // (optional)
+		readableStrategy: undefined  // (optional)
+	  });
+	  
+	  writer = fileStream.getWriter();
+	  
+	  // hier würde man die Blöcke vom Server holen entschlüsseln und via stream lokal speichern
+	  for (const block of serverSimulation) {
+		
+	  
+		await sleep(1000);
+		console.log(block);
+		writer.write(block);
+	  }
+	  
+	  await sleep(1000);
+	  writer.close();	  	
+	}
+	
+	function sleep(ms) {
+		return new Promise(resolve => setTimeout(resolve, ms));
+	}
+	
+	
+	
+
+	
+  </script>
+  
+</body>
+</html>
