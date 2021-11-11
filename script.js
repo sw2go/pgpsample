@@ -38,10 +38,11 @@ async function readText(event) {
 }
 
 
-async function generateKeys() {
 
+async function generateKeys() {
+	
     const userid = { name: 'Jon Smith', email: 'jon@example.com' };
-	const passphrase = 'my passphrase';
+	const passphrase = 'my passphrase'; // generatePassphrase();
     
 	const key = await window.openpgp.generateKey({
         type: 'rsa', // Type of the key
@@ -53,8 +54,19 @@ async function generateKeys() {
 	console.log(key);
 	publicKeyArmored = key.publicKey;
 	privateKeyArmored = key.privateKey;
+	
+	console.log(generatePassphrase());
+	
 
 }
+
+function generatePassphrase() {
+    var buf = new Uint8Array(1024);
+    window.crypto.getRandomValues(buf);
+    return btoa(String.fromCharCode.apply(null, buf));
+}
+
+
 
 
 function downloadBlob(data, fileName, mimeType) {
